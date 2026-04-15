@@ -3,6 +3,25 @@ import math
 from src.state import State
 import numpy as np
 
+class npEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, set):
+            return list(obj)
+        else:
+            return super(npEncoder, self).default(obj)
+            
+    def encode(self, obj):
+        for key, value in obj.items():
+            if isinstance(key, np.integer):
+                key = np.array2string(key)
+                return super(npEncoder, self).encode({key: value})
+            return super(npEncoder, self).encode({key, value})
 
 class Groundstation:
 
@@ -69,9 +88,11 @@ class Groundstation:
             "position": (round(self.state.x, 4), round(self.state.y, 4), round(self.state.z, 4)),
             "outgoing_throughput": self.outgoing_throughput,
             "incoming_streams": json.dumps({key: round(sum(map(lambda x: x[1], value)))
-                                            for key, value in self.incoming_streams.items()}),
+                                            for key, value in self.incoming_streams.items()},
+                                            cls=npEncoder),
             "outgoing_streams": json.dumps({key: round(sum(map(lambda x: x[1], value)))
-                                            for key, value in self.outgoing_streams.items()}),
+                                            for key, value in self.outgoing_streams.items()},
+                                            cls=npEncoder),
             "delay": self.delay,
             "drop_rate": self.drop_rate
         }

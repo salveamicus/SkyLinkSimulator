@@ -3,6 +3,25 @@ import math
 import numpy as np
 from src.state import State
 
+class npEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()  
+        elif isinstance(obj, set):
+            return list(obj)
+        else:
+            return super(npEncoder, self).default(obj)
+            
+    def encode(self, obj):
+        for key, value in obj.items():
+            if isinstance(key, np.integer):
+                key = np.array2string(key)
+                return super(npEncoder, self).encode({key: value})
+            return super(npEncoder, self).encode({key, value})
 
 class Satellite:
     atmospheric_attenuation: np.array
@@ -153,11 +172,13 @@ class Satellite:
             "neighbours": self.ISL_connections,
             "target_ids": self.target_ids,
             "generation_rate": round(self.generation_rate),
-            "outgoing_throughputs": json.dumps({key: round(value) for key, value in self.outgoing_throughputs.items()}),
+            "outgoing_throughputs": json.dumps({key: round(value) for key, value in self.outgoing_throughputs.items()}, cls=npEncoder),
             "incoming_streams": json.dumps({key: round(sum(map(lambda x: x[1], value)))
-                                            for key, value in self.incoming_streams.items()}),
+                                            for key, value in self.incoming_streams.items()},
+                                            cls=npEncoder),
             "outgoing_streams": json.dumps({key: round(sum(map(lambda x: x[1], value)))
-                                            for key, value in self.outgoing_streams.items()}),
+                                            for key, value in self.outgoing_streams.items()},
+                                            cls=npEncoder),
             "delay": round(self.delay, 2),
             "drop_rate": round(self.drop_rate, 2),
             "cost": round(self.cost, 2)
