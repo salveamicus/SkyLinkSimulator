@@ -19,6 +19,7 @@ data/**/*.h5
 results/**
 logging/**
 *.csv
+src/calculators/de440.bsp
 
 # Plots/figures
 *.png

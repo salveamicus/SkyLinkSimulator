@@ -2,6 +2,7 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.colors as mcolors
+from pathlib import Path
 
 plt.rcParams.update({
     "text.usetex": True,
@@ -15,6 +16,7 @@ plt.rcParams.update({
 def plot_bar_charts(avgs, stds, metric):
     strategies = ["SKYLINK",
                   "NC-SKYLINK",
+                  "Thompson",
                   "Q-learning",
                   "Random",
                   "Bent-Pipe",
@@ -29,10 +31,12 @@ def plot_bar_charts(avgs, stds, metric):
                 "..",
                 "-",
                 "/",
-                '']
+                '',
+                'oo']
     colors_base = [
         '#E6001A',
         '#772583',
+        '#2A9D8F',
         '#B8B184',
         '#1f78b4',
         '#E87722',
@@ -134,19 +138,29 @@ def plot_bar_charts(avgs, stds, metric):
 def get_paths(sat_failures, gs_failures, gfs):
     strategies = ["SKYLINK",
                   "NC-SKYLINK",
+                  "Thompson",
+                  "Q-learning",
                   "Random",
                   "Bent-Pipe",
                   "KSP",
                   "Dijkstra",
-                  "Q-learning",
                   ]
     pths = {s: [] for s in strategies}
     filenames = {}
+    results_dir = Path(pth)
     for gf in gfs:
         suffix = f"{sat_failures}_{gs_failures}_{gf}"
+        thompson_prefix = "tile_coded_thompson_0500000_2"
+        first_run_file = results_dir / f"evaluation_data_{thompson_prefix}_{suffix}_0.npy"
+        if not first_run_file.exists():
+            thompson_candidates = sorted(results_dir.glob(f"evaluation_data_*thompson*_{suffix}_0.npy"))
+            if thompson_candidates:
+                candidate_name = thompson_candidates[0].name
+                thompson_prefix = candidate_name.replace("evaluation_data_", "").replace(f"_{suffix}_0.npy", "")
         i = 0
         for prefix in ["tile_coded_ucb_0500000_2",
                        "ucb",
+                       thompson_prefix,
                        "q_learning",
                        "random",
                        "bent-pipe",
@@ -162,6 +176,7 @@ def get_paths(sat_failures, gs_failures, gfs):
 def calculate_improvements(avgs, metric):
     strategies = ["SKYLINK",
                   "NC-SKYLINK",
+                  "Thompson",
                   "Q-learning",
                   "Random",
                   "Bent-Pipe",

@@ -1,11 +1,17 @@
 import _pickle
 import pickle
+import shutil
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from pathlib import Path
+
+HAS_LATEX = shutil.which("latex") is not None
+if not HAS_LATEX:
+    print("LaTeX executable not found. Falling back to Matplotlib's internal text rendering.")
 
 plt.rcParams.update({
-    "text.usetex": True,
+    "text.usetex": HAS_LATEX,
     "font.size": 32,
     "font.family": "serif",
     "font.serif": ["Times New Roman"],
@@ -30,6 +36,7 @@ labels = [
     "Dijkstra",
     "KSP",
     "Q-Learning",
+    "Thompson",
     "NC-SKYLINK",
     "SKYLINK",
 ]
@@ -44,8 +51,46 @@ markers = ['d',
            '<',
            ]
 
+METRIC_ALIASES = {
+    "fairness": ["fairness", "jains_fairness_index", "jain_fairness_index", "fairness_index"],
+}
+
 def sliding_window_mean(data, ws):
     return np.convolve(data, np.ones(ws) / ws, mode='valid')
+
+
+def get_metric_key(run_data, metric):
+    if not run_data:
+        return None
+
+    available_keys = run_data[0].keys()
+    if metric in available_keys:
+        return metric
+
+    for alias in METRIC_ALIASES.get(metric, []):
+        if alias in available_keys:
+            return alias
+
+    lower_to_original = {k.lower(): k for k in available_keys}
+    if metric.lower() in lower_to_original:
+        return lower_to_original[metric.lower()]
+
+    for alias in METRIC_ALIASES.get(metric, []):
+        if alias.lower() in lower_to_original:
+            return lower_to_original[alias.lower()]
+
+    return None
+
+
+def get_metric_series(run_data, metric, metric_key):
+    if metric_key is not None:
+        return [d[metric_key] for d in run_data]
+
+    if metric == "fairness" and run_data and "drop_rate" in run_data[0]:
+        print("Metric 'fairness' missing. Falling back to derived fairness = 1 - drop_rate.")
+        return [1 - d["drop_rate"] for d in run_data]
+
+    return None
 
 def draw_generation_rate_box(x_upper, generation_rate_smooth, label='Generation Rate'):
     x_pos = 0.75 * x_upper
@@ -81,8 +126,10 @@ def plot_evaluation_data(
     orbital_period_time_steps = 1.82 * 60 * 4
     generation_rate = None
     x_data = None
+    x_label = "Days"
 
     extra_artists = []
+    loaded_any_data = False
 
     for file_no in range(len(filenames)):
         filename = filenames[file_no]
@@ -107,7 +154,19 @@ def plot_evaluation_data(
             print(f"File not found: {filename}")
             continue
 
-        metric_data = np.array([[d[metric] for d in run][start:end] for run in data])
+        selected_metric_key = get_metric_key(data[0], metric)
+        metric_series = [get_metric_series(run, metric, selected_metric_key) for run in data]
+        metric_series = [series for series in metric_series if series is not None]
+        if not metric_series:
+            available_keys = sorted(data[0][0].keys()) if data[0] else []
+            print(
+                f"Metric '{metric}' not found in {filename}. "
+                f"Available keys: {available_keys}. Skipping file."
+            )
+            continue
+
+        loaded_any_data = True
+        metric_data = np.array([series[start:end] for series in metric_series])
         metric_data_mean = np.mean(metric_data, axis=0)
 
         if metric == "cost":
@@ -155,9 +214,21 @@ def plot_evaluation_data(
             linewidth=2 if label == "SKYLINK" else 1
         )
 
+    if not loaded_any_data:
+        print(f"No valid data loaded for metric '{metric}'. Skipping plot.")
+        plt.close(fig)
+        return
+
     if metric == "throughput" and generation_rate is not None:
         generation_rate_smooth = sliding_window_mean(generation_rate, window_size)
-        ax.plot(x_data, generation_rate_smooth, linestyle='--', color='black', linewidth=2)
+        if orbital_rounds:
+            generation_x_start = window_size / orbital_period_time_steps
+            generation_x_end = generation_x_start + len(generation_rate_smooth) / orbital_period_time_steps
+        else:
+            generation_x_start = window_size / (24 * 60 * 4)
+            generation_x_end = generation_x_start + len(generation_rate_smooth) / (24 * 60 * 4)
+        generation_x = np.linspace(generation_x_start, generation_x_end, len(generation_rate_smooth))
+        ax.plot(generation_x, generation_rate_smooth, linestyle='--', color='black', linewidth=2)
         draw_generation_rate_box(x_upper, generation_rate_smooth)
 
     if gsl_failures or isl_failures:
@@ -200,15 +271,24 @@ def plot_evaluation_data(
     )
     extra_artists.append(leg)
 
-    out_path = pth + name + "_" + metric + "_" + str(gsl_failures) + "_" + str(isl_failures) + "_" + str(gf) + ".pdf"
+    output_dir = Path(pth)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"{name}_{metric}_{gsl_failures}_{isl_failures}_{gf}.png"
     fig.savefig(out_path, bbox_inches="tight", bbox_extra_artists=extra_artists)
-    plt.show()
-    plt.close(fig)
+    print(f"Saved plot to: {out_path.resolve()}")
+    # plt.show()
+    # plt.close(fig)
 
 
 def get_pths(gsl_failures, isl_failures, gf):
 
     suffix = str(int(gsl_failures)) + "_" + str(int(isl_failures)) + "_" + str(gf) + "_0"
+    results_dir = Path(pth)
+    thompson_filename = "evaluation_data_tile_coded_thompson_0500000_2_" + suffix + ".npy"
+    if not (results_dir / thompson_filename).exists():
+        thompson_candidates = sorted(results_dir.glob(f"evaluation_data_*thompson*_{suffix}.npy"))
+        if thompson_candidates:
+            thompson_filename = thompson_candidates[0].name
 
     filenames = ([
         "evaluation_data_random_" + suffix + ".npy",
@@ -216,6 +296,7 @@ def get_pths(gsl_failures, isl_failures, gf):
         "evaluation_data_dijkstra_" + suffix + ".npy",
         "evaluation_data_gounder_" + suffix + ".npy",
         "evaluation_data_q_learning_" + suffix + ".npy",
+        thompson_filename,
         "evaluation_data_ucb_" + suffix + ".npy",
         "evaluation_data_tile_coded_ucb_0500000_2_" + suffix + ".npy",
     ])
@@ -227,9 +308,9 @@ name = "time_plot"
 window_size = 4 * 60 * 12
 start = 0
 end = 4 * 60 * 24 * 10
-pth = "results"
+pth = "results/"
 g = 2.0
-gsl_f = 1
+gsl_f = 0
 isl_f = 0
 no_of_runs = 10
 pths = get_pths(gsl_f,isl_f, g)
